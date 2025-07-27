@@ -179,9 +179,16 @@ router.put('/:id', [
         return res.status(404).json({ error: 'Company not found' });
       }
 
-      res.json({
-        message: 'Company updated successfully',
-        changes: this.changes
+      // Get the updated company data
+      db.get('SELECT * FROM companies WHERE id = ?', [companyId], (getErr, company) => {
+        if (getErr) {
+          return res.status(500).json({ error: 'Failed to retrieve updated company' });
+        }
+
+        res.json({
+          message: 'Company updated successfully',
+          company: company
+        });
       });
     });
   } catch (error) {

@@ -29,6 +29,11 @@ export const companyService = {
     return response.data;
   },
 
+  async getUserCompany() {
+    const response = await api.get('/companies/my/company');
+    return response.data;
+  },
+
   async updateCompany(companyId, companyData) {
     const response = await api.put(`/companies/${companyId}`, companyData);
     return response.data;

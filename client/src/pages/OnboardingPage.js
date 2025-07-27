@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -38,6 +38,48 @@ function OnboardingPage() {
     resolver: zodResolver(menuItemSchema),
   });
 
+  // Initialize companyId if user already has a company
+  useEffect(() => {
+    const initializeCompany = async () => {
+      try {
+        console.log('Initializing company...');
+        const existingCompany = await companyService.getUserCompany();
+        console.log('Initializing with existing company:', existingCompany);
+        setCompanyId(existingCompany.company.id);
+        setCompanyData({
+          name: existingCompany.company.name,
+          description: existingCompany.company.description
+        });
+        console.log('Company ID set to:', existingCompany.company.id);
+      } catch (error) {
+        if (error.response?.status !== 404) {
+          console.error('Error initializing company:', error);
+        } else {
+          console.log('No existing company found, will create new one');
+        }
+      }
+    };
+
+    initializeCompany();
+  }, []); // Remove companyForm from dependencies
+
+  // Reset form when company data changes
+  useEffect(() => {
+    console.log('Company data changed:', companyData);
+    if (companyData.name) {
+      companyForm.reset({
+        name: companyData.name,
+        description: companyData.description || ''
+      });
+      console.log('Form reset with company data');
+    }
+  }, [companyData, companyForm]);
+
+  // Debug companyId changes
+  useEffect(() => {
+    console.log('Company ID changed to:', companyId);
+  }, [companyId]);
+
   const steps = [
     { id: 1, title: 'Company Name', description: 'Enter your business name' },
     { id: 2, title: 'Description', description: 'Tell us about your business' },
@@ -49,17 +91,56 @@ function OnboardingPage() {
   const handleCompanySubmit = async (data) => {
     setLoading(true);
     try {
-      const response = await companyService.createCompany({
-        ...data,
-        owner_id: user.id,
-      });
-      
-      setCompanyData(data);
-      setCompanyId(response.company.id);
-      setCurrentStep(2);
-      toast.success('Company created successfully!');
+      if (companyId) {
+        // We already have a company, just update it
+        console.log('Updating existing company with ID:', companyId);
+        const response = await companyService.updateCompany(companyId, {
+          name: data.name,
+          description: data.description || companyData.description
+        });
+        
+        console.log('Company updated:', response);
+        setCompanyData(data);
+        setCurrentStep(2);
+        toast.success('Company updated successfully!');
+      } else {
+        // Check if user already has a company
+        try {
+          const existingCompany = await companyService.getUserCompany();
+          console.log('Existing company found:', existingCompany);
+          
+          // If user has a company, update it instead of creating new one
+          const response = await companyService.updateCompany(existingCompany.company.id, {
+            name: data.name,
+            description: data.description || existingCompany.company.description
+          });
+          
+          console.log('Company updated:', response);
+          setCompanyData(data);
+          setCompanyId(existingCompany.company.id);
+          setCurrentStep(2);
+          toast.success('Company updated successfully!');
+        } catch (error) {
+          if (error.response?.status === 404) {
+            // User doesn't have a company, create new one
+            const response = await companyService.createCompany({
+              ...data,
+              owner_id: user.id,
+            });
+            
+            console.log('Company created:', response);
+            setCompanyData(data);
+            setCompanyId(response.company.id);
+            setCurrentStep(2);
+            toast.success('Company created successfully!');
+          } else {
+            throw error;
+          }
+        }
+      }
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to create company');
+      console.error('Company submission error:', error);
+      toast.error(error.response?.data?.error || 'Failed to create/update company');
     } finally {
       setLoading(false);
     }
@@ -68,30 +149,44 @@ function OnboardingPage() {
   const handleDescriptionSubmit = async (data) => {
     setLoading(true);
     try {
-      await companyService.updateCompany(companyId, { description: data.description });
-      setCompanyData(prev => ({ ...prev, description: data.description }));
+      console.log('Submitting description with companyId:', companyId);
+      console.log('Current companyData:', companyData);
+      
+      if (!companyId) {
+        throw new Error('Company ID is required');
+      }
+      
+      if (data.description && data.description.trim()) {
+        await companyService.updateCompany(companyId, { description: data.description });
+        setCompanyData(prev => ({ ...prev, description: data.description }));
+      }
       setCurrentStep(3);
       toast.success('Description updated!');
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to update description');
+      console.error('Description submission error:', error);
+      toast.error(error.response?.data?.error || error.message || 'Failed to update description');
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogoUpload = async () => {
-    if (!logoFile) {
-      setCurrentStep(4);
-      return;
-    }
-
     setLoading(true);
     try {
-      await companyService.uploadLogo(companyId, logoFile);
+      console.log('Uploading logo with companyId:', companyId);
+      
+      if (!companyId) {
+        throw new Error('Company ID is required');
+      }
+      
+      if (logoFile) {
+        await companyService.uploadLogo(companyId, logoFile);
+        toast.success('Logo uploaded successfully!');
+      }
       setCurrentStep(4);
-      toast.success('Logo uploaded successfully!');
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to upload logo');
+      console.error('Logo upload error:', error);
+      toast.error(error.response?.data?.error || error.message || 'Failed to upload logo');
     } finally {
       setLoading(false);
     }
@@ -100,6 +195,12 @@ function OnboardingPage() {
   const handleMenuItemSubmit = async (data) => {
     setLoading(true);
     try {
+      console.log('Submitting menu item with companyId:', companyId);
+      
+      if (!companyId) {
+        throw new Error('Company ID is required');
+      }
+      
       const response = await menuItemService.createMenuItem({
         ...data,
         company_id: companyId,
@@ -110,7 +211,8 @@ function OnboardingPage() {
       setCurrentStep(5);
       toast.success('Menu item added!');
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to add menu item');
+      console.error('Menu item submission error:', error);
+      toast.error(error.response?.data?.error || error.message || 'Failed to add menu item');
     } finally {
       setLoading(false);
     }
@@ -119,6 +221,12 @@ function OnboardingPage() {
   const handleGenerateQRCode = async () => {
     setLoading(true);
     try {
+      console.log('Generating QR code with companyId:', companyId);
+      
+      if (!companyId) {
+        throw new Error('Company ID is required');
+      }
+      
       await companyService.generateQRCode(companyId);
       
       // Update user to mark first login as complete
@@ -127,7 +235,22 @@ function OnboardingPage() {
       toast.success('QR Code generated! Welcome to your dashboard!');
       navigate('/dashboard');
     } catch (error) {
-      toast.error(error.response?.data?.error || 'Failed to generate QR code');
+      console.error('QR code generation error:', error);
+      toast.error(error.response?.data?.error || error.message || 'Failed to generate QR code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSkipOnboarding = async () => {
+    setLoading(true);
+    try {
+      // Update user to mark first login as complete
+      updateUser({ ...user, is_first_login: false });
+      toast.success('Welcome to your dashboard!');
+      navigate('/dashboard');
+    } catch (error) {
+      toast.error('Failed to skip onboarding');
     } finally {
       setLoading(false);
     }
@@ -155,20 +278,30 @@ function OnboardingPage() {
               )}
             </div>
             
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn-primary w-full flex items-center justify-center"
-            >
-              {loading ? (
-                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
-              ) : (
-                <>
-                  Continue
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </>
-              )}
-            </button>
+            <div className="flex space-x-4">
+              <button
+                type="button"
+                onClick={handleSkipOnboarding}
+                disabled={loading}
+                className="btn-secondary flex-1 flex items-center justify-center"
+              >
+                Skip for Now
+              </button>
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary flex-1 flex items-center justify-center"
+              >
+                {loading ? (
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                ) : (
+                  <>
+                    Continue
+                    <ArrowRight className="ml-2 h-5 w-5" />
+                  </>
+                )}
+              </button>
+            </div>
           </form>
         );
 
@@ -195,6 +328,13 @@ function OnboardingPage() {
               >
                 <ArrowLeft className="mr-2 h-5 w-5" />
                 Back
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(3)}
+                className="btn-secondary flex-1 flex items-center justify-center"
+              >
+                Skip
               </button>
               <button
                 type="submit"
@@ -253,6 +393,13 @@ function OnboardingPage() {
               >
                 <ArrowLeft className="mr-2 h-5 w-5" />
                 Back
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(4)}
+                className="btn-secondary flex-1 flex items-center justify-center"
+              >
+                Skip
               </button>
               <button
                 onClick={handleLogoUpload}
@@ -322,6 +469,13 @@ function OnboardingPage() {
               >
                 <ArrowLeft className="mr-2 h-5 w-5" />
                 Back
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(5)}
+                className="btn-secondary flex-1 flex items-center justify-center"
+              >
+                Skip
               </button>
               <button
                 type="submit"

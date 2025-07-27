@@ -41,21 +41,24 @@ function SettingsPage() {
   });
 
   useEffect(() => {
-    if (user?.company_id) {
-      loadCompanyData();
-    }
-  }, [user]);
+    loadCompanyData();
+  }, []);
 
   const loadCompanyData = async () => {
     try {
-      const response = await companyService.getCompany(user.company_id);
+      const response = await companyService.getUserCompany();
       setCompany(response.company);
       reset({
         name: response.company.name,
         description: response.company.description || '',
       });
     } catch (error) {
-      toast.error('Failed to load company data');
+      if (error.response?.status === 404) {
+        toast.error('No company found. Please complete onboarding first.');
+        navigate('/onboarding');
+      } else {
+        toast.error('Failed to load company data');
+      }
     } finally {
       setLoading(false);
     }
@@ -64,8 +67,8 @@ function SettingsPage() {
   const handleCompanyUpdate = async (data) => {
     setSaving(true);
     try {
-      const response = await companyService.updateCompany(user.company_id, data);
-      setCompany(response.company);
+      await companyService.updateCompany(company.id, data);
+      setCompany(prev => ({ ...prev, ...data }));
       toast.success('Company settings updated successfully!');
     } catch (error) {
       toast.error(error.response?.data?.error || 'Failed to update company settings');
@@ -79,8 +82,9 @@ function SettingsPage() {
 
     setSaving(true);
     try {
-      const response = await companyService.uploadLogo(user.company_id, logoFile);
-      setCompany(response.company);
+      await companyService.uploadLogo(company.id, logoFile);
+      // Reload company data to get updated logo URL
+      await loadCompanyData();
       setLogoFile(null);
       toast.success('Logo uploaded successfully!');
     } catch (error) {
